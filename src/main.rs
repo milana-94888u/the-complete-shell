@@ -1,36 +1,6 @@
-use std::collections::btree_map::Iter;
-use std::fs::read_to_string;
 use std::iter::Peekable;
-use std::process::id;
 use rustyline::{DefaultEditor};
 use rustyline::error::ReadlineError;
-//struct MultiPeek<I: Iterator> {
-//    iter: I,
-//    buff: Vec<I::Item>,
-//}
-
-//impl<I: Iterator> MultiPeek<I> {
-//    fn new(iter: I) -> Self {
-//        Self {iter, buff: vec![]}
-//   // }
-
-//    fn peek(&mut self) -> Option<&I::Item> {
-//        let next_element = self.iter.next();
-//        match next_element {
-//            Some(value) => {
-//                self.buff.push(value);
-//                Some(self.buff.last().unwrap())
-//            },
-//            None => None,
-//        }
-//   // }
-
-//    fn put_back(&mut self) {
-//        let old_buff = std::mem::take(&mut self.buff);
-//        let old_iter = std::mem::take(&mut self.iter);
-//        self.iter = old_buff.into_iter().chain(old_iter);
-//    }
-//}
 
 enum ParseError {
     RequiresNextLine,
@@ -39,12 +9,15 @@ enum ParseError {
 type ParseResult<T> = Result<Option<T>, ParseError>;
 
 #[derive(Clone)]
+#[derive(Debug)]
 enum ShellExpression {
     Literal(Vec<u8>),
     Variable(Vec<u8>),
     IntSubstitution(i32, i32),
+    FilenameSubstitution(Vec<u8>),
     AsciiSubstitution(u8, u8),
-    ShellList(Vec<Box<ShellWord>>),
+    ShellList(Vec<ShellWord>),
+    DoubleQuoteExpression(Vec<ShellExpression>),
     SubShellExpression(Box<ShellInput>),  // $(...)
     ArithmeticExpression(String),  // $((...)) TODO: replace with own structure
     TestExpression(String),  // $[...] TODO: replace with own structure
@@ -53,23 +26,27 @@ enum ShellExpression {
 
 #[derive(Clone)]
 #[derive(Default)]
+#[derive(Debug)]
 struct ShellWord {
-    parts: Vec<Box<ShellExpression>>,
+    parts: Vec<ShellExpression>,
     original: Vec<u8>,
 }
 
 #[derive(Clone)]
+#[derive(Debug)]
 struct ShellAssign {
     identifier: Vec<u8>,
     value: ShellWord,
 }
 
 #[derive(Clone)]
+#[derive(Debug)]
 struct ShellRedirection {
 
 }
 
 #[derive(Clone)]
+#[derive(Debug)]
 enum ShellInput {
     Command(Vec<ShellAssign>, Vec<ShellWord>, Vec<ShellRedirection>),
     Function(Vec<u8>, Vec<ShellInput>),
@@ -193,10 +170,15 @@ where
     }
 
     fn check_specific_keyword(&mut self, keyword: &[u8]) -> bool {
-        //if self.input.as_bytes()[self.index..].starts_with(keyword) {
-        //    self.index += keyword.len();
-          //  return true;
-//        };
+        let iter_state = self.iter.clone();
+        let mut iter = keyword.iter().peekable();
+        while self.iter.next_if(|c| { iter.peek() == Some(&c) }).is_some() {
+            iter.next();
+        }
+        if iter.peek().is_some() {
+            return true;
+        }
+        self.iter = iter_state;
         return false;
     }
 
@@ -221,10 +203,10 @@ where
     }
 
     fn check_var_identifier(c: u8, is_first: bool) -> bool {
-        if (c.is_ascii_alphabetic() || c == b'_') {
+        if c.is_ascii_alphabetic() || c == b'_' {
             return true;
         }
-        if (c.is_ascii_digit() || !is_first) {
+        if c.is_ascii_digit() && !is_first {
             return true;
         }
         false
@@ -236,9 +218,9 @@ where
     }
 
     fn try_get_identifier(&mut self) -> Option<Vec<u8>> {
-        if let Some(first_char) = self.iter.next_if(|&c| { c.is_ascii_alphabetic() || c == b'_' }) {
+        if let Some(first_char) = self.iter.next_if(|&c| {Self::check_var_identifier(c, true)}) {
             let mut identifier = vec![first_char];
-            while let Some(next_char) = self.iter.next_if(|&c| { c.is_ascii_alphanumeric() || c == b'_' }) {
+            while let Some(next_char) = self.iter.next_if(|&c| { Self::check_var_identifier(c, false) }) {
                 identifier.push(next_char);
             }
             return Some(identifier);
@@ -259,19 +241,96 @@ where
         Ok(None)
     }
 
+    fn try_parse_single_quote_expression(&mut self) -> ParseResult<ShellExpression> {
+        let mut result: Vec<u8> = vec![];
+        while let Some(next_char) = self.iter.next() {
+            if next_char == b'\'' {
+                return Ok(Some(ShellExpression::Literal(result)));
+            }
+            result.push(next_char);
+        }
+        Err(ParseError::RequiresNextLine)
+    }
+
+    fn try_parse_double_quote_expression(&mut self) -> ParseResult<ShellExpression> {
+        let mut result: Vec<ShellExpression> = vec![];
+        let mut current_literal: Vec<u8> = vec![];
+        while let Some(next_char) = self.iter.next() {
+            if next_char == b'\\' {
+                if let Some(next_char) = self.iter.next() {
+                    match next_char {
+                        b'\\' | b'$' | b'\"' => current_literal.push(next_char),
+                        b'\n' => {},
+                        _ => {
+                            current_literal.push(b'\\');
+                            current_literal.push(next_char);
+                        }
+                    }
+                }
+                else {
+                    return Err(ParseError::RequiresNextLine);
+                }
+            }
+            else if next_char == b'$' {
+                result.push(ShellExpression::Literal(current_literal.clone()));
+                current_literal.clear();
+                result.push(self.try_parse_variable_or_subexpression()?.unwrap());
+            }
+            else if next_char == b'\"' {
+                result.push(ShellExpression::Literal(current_literal.clone()));
+                current_literal.clear();
+                return Ok(Some(ShellExpression::DoubleQuoteExpression(result)));
+            }
+            else {
+                current_literal.push(next_char);
+            }
+        }
+        Err(ParseError::RequiresNextLine)
+    }
+
+    fn try_parse_variable_or_subexpression(&mut self) -> ParseResult<ShellExpression> {
+        // TODO complete parsing
+        Ok(Some(ShellExpression::Literal(vec![b'$'])))
+    }
+
     fn try_parse_word(&mut self, parse_substitutions: bool) -> ParseResult<ShellWord> {
         let mut res = ShellWord {
             parts: vec![],
             original: vec![],
         };
+        // TODO remove original
+        let mut current_literal: Vec<u8> = vec![];
         while let Some(next_char) = self.iter.next_if(|&c| !Self::is_word_stop_char(c)) {
-            if next_char == b'(' || next_char == b')' {
-                // ERROR
-                return Err(ParseError::IncorrectSyntax);
+            if next_char == b'\\' {
+                match self.iter.next() {
+                    Some(next_char) => current_literal.push(next_char),
+                    None => return Err(ParseError::RequiresNextLine),
+                }
             }
-            res.original.push(next_char);
+            else if next_char == b'$' {
+                res.parts.push(ShellExpression::Literal(current_literal.clone()));
+                current_literal.clear();
+                res.parts.push(self.try_parse_variable_or_subexpression()?.unwrap());
+            }
+            else if next_char == b'\'' {
+                res.parts.push(ShellExpression::Literal(current_literal.clone()));
+                current_literal.clear();
+                res.parts.push(self.try_parse_single_quote_expression()?.unwrap());
+            }
+            else if next_char == b'\"' {
+                res.parts.push(ShellExpression::Literal(current_literal.clone()));
+                current_literal.clear();
+                res.parts.push(self.try_parse_double_quote_expression()?.unwrap())
+            }
+            else {
+                current_literal.push(next_char);
+            }
         };
-        match res.original.len() {
+        if !current_literal.is_empty() {
+            res.parts.push(ShellExpression::Literal(current_literal.clone()));
+            current_literal.clear();
+        }
+        match res.parts.len() {
             0 => Ok(None),
             _ => Ok(Some(res)),
         }
@@ -280,7 +339,6 @@ where
 
 fn main() {
     let mut ed = DefaultEditor::new().unwrap();
-    let mut current_command = String::new();
     loop {
         let next_line = ed.readline("cosh $ ");
         match next_line {
@@ -291,35 +349,7 @@ fn main() {
                 };
                 match parser.try_parse(false) {
                     Ok(Some(input)) => {
-                        for i in input {
-                            match i {
-                                ShellInput::Command(assignments, words, _) => {
-                                    print!("A command: (");
-                                    for a in assignments {
-                                        let name = String::from_utf8(a.identifier).unwrap();
-                                        let value = String::from_utf8(a.value.original).unwrap();
-                                        print!("{name} is assigned to {value}, ");
-                                    }
-                                    for w in words {
-                                        let word = String::from_utf8(w.original).unwrap();
-                                        print!("the next word is {word}, ");
-                                    }
-                                    println!("redirections are not supported yet)");
-                                }
-                                ShellInput::Assignment(assignments) => {
-                                    print!("A global assignment: (");
-                                    for a in assignments {
-                                        let name = String::from_utf8(a.identifier).unwrap();
-                                        let value = String::from_utf8(a.value.original).unwrap();
-                                        print!("{name} is assigned to {value}, ");
-                                    }
-                                    println!(")");
-                                }
-                                _ => {
-
-                                }
-                            }
-                        }
+                        println!("{input:?}");
                     },
                     Ok(None) => {
                         println!("Empty input");
