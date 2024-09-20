@@ -1,21 +1,24 @@
+mod shell_parser_base;
+mod shell_parsers;
+
+use std::cmp;
+use std::fmt::Debug;
 use std::iter::Peekable;
 use rustyline::{DefaultEditor};
 use rustyline::error::ReadlineError;
 
-enum ParseError {
-    RequiresNextLine,
-    IncorrectSyntax,
-}
-type ParseResult<T> = Result<Option<T>, ParseError>;
+use shell_parser_base::{ParseError, ParseResult};
+
+use shell_parsers::shell_range_parser::{ShellRange, ShellRangeParser};
 
 #[derive(Clone)]
 #[derive(Debug)]
 enum ShellExpression {
     Literal(Vec<u8>),
+    EscapedLiteral(u8),
     Variable(Vec<u8>),
-    IntSubstitution(i32, i32),
+    Range(ShellRange),
     FilenameSubstitution(Vec<u8>),
-    AsciiSubstitution(u8, u8),
     ShellList(Vec<ShellWord>),
     DoubleQuoteExpression(Vec<ShellExpression>),
     SubShellExpression(Box<ShellInput>),  // $(...)
@@ -29,7 +32,6 @@ enum ShellExpression {
 #[derive(Debug)]
 struct ShellWord {
     parts: Vec<ShellExpression>,
-    original: Vec<u8>,
 }
 
 #[derive(Clone)]
@@ -58,13 +60,6 @@ enum ShellInput {
     //If(ShellExpression, ShellInput),
     //While(ShellExpression, ShellInput),
     //Until(ShellExpression, ShellInput),
-}
-
-enum ParsingContext {
-    FirstWord(ShellWord),
-    WereAssignments(Vec<ShellAssign>),
-    ParsingCommand(ShellInput),
-    Initial,
 }
 
 struct ShellInputParser<I>
@@ -272,13 +267,11 @@ where
                 }
             }
             else if next_char == b'$' {
-                result.push(ShellExpression::Literal(current_literal.clone()));
-                current_literal.clear();
+                result.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
                 result.push(self.try_parse_variable_or_subexpression()?.unwrap());
             }
             else if next_char == b'\"' {
-                result.push(ShellExpression::Literal(current_literal.clone()));
-                current_literal.clear();
+                result.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
                 return Ok(Some(ShellExpression::DoubleQuoteExpression(result)));
             }
             else {
@@ -289,38 +282,49 @@ where
     }
 
     fn try_parse_variable_or_subexpression(&mut self) -> ParseResult<ShellExpression> {
-        // TODO complete parsing
-        Ok(Some(ShellExpression::Literal(vec![b'$'])))
+        todo!();
     }
 
-    fn try_parse_word(&mut self, parse_substitutions: bool) -> ParseResult<ShellWord> {
+    fn try_parse_brace_expansion(&mut self) -> ParseResult<ShellExpression> {
+        let mut shell_range_parser = ShellRangeParser::new(self.iter.clone());
+        if let Some(shell_range) = shell_range_parser.parse()? {
+            self.iter = shell_range_parser.iter;
+            return Ok(Some(ShellExpression::Range(shell_range)));
+        }
+        Ok(None)
+    }
+
+    fn try_parse_word(&mut self, parse_brace_expansions: bool) -> ParseResult<ShellWord> {
         let mut res = ShellWord {
             parts: vec![],
-            original: vec![],
         };
-        // TODO remove original
         let mut current_literal: Vec<u8> = vec![];
         while let Some(next_char) = self.iter.next_if(|&c| !Self::is_word_stop_char(c)) {
             if next_char == b'\\' {
                 match self.iter.next() {
-                    Some(next_char) => current_literal.push(next_char),
+                    Some(b'\n') => {},
+                    Some(next_char) => {
+                        res.parts.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
+                        res.parts.push(ShellExpression::EscapedLiteral(next_char));
+                    },
                     None => return Err(ParseError::RequiresNextLine),
                 }
             }
             else if next_char == b'$' {
-                res.parts.push(ShellExpression::Literal(current_literal.clone()));
-                current_literal.clear();
+                res.parts.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
                 res.parts.push(self.try_parse_variable_or_subexpression()?.unwrap());
             }
             else if next_char == b'\'' {
-                res.parts.push(ShellExpression::Literal(current_literal.clone()));
-                current_literal.clear();
+                res.parts.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
                 res.parts.push(self.try_parse_single_quote_expression()?.unwrap());
             }
             else if next_char == b'\"' {
-                res.parts.push(ShellExpression::Literal(current_literal.clone()));
-                current_literal.clear();
+                res.parts.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
                 res.parts.push(self.try_parse_double_quote_expression()?.unwrap())
+            }
+            else if next_char == b'{' && parse_brace_expansions {
+                res.parts.push(ShellExpression::Literal(std::mem::take(&mut current_literal)));
+                res.parts.push(self.try_parse_brace_expansion()?.unwrap());
             }
             else {
                 current_literal.push(next_char);
@@ -343,7 +347,7 @@ fn main() {
         let next_line = ed.readline("cosh $ ");
         match next_line {
             Ok(line) => {
-                ed.add_history_entry(line.as_str());
+                ed.add_history_entry(line.as_str()).expect("TODO: panic message");
                 let mut parser = ShellInputParser {
                     iter: line.into_bytes().into_iter().peekable(),
                 };
