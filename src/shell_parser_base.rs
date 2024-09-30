@@ -31,6 +31,16 @@ pub fn get_brace_list_word_parsing_rules(base_rules: &ShellParsingRules, is_firs
     }
 }
 
+pub fn get_variable_value_word_parsing_rules(base_rules: &ShellParsingRules) -> ShellWordParsingRules {
+    ShellWordParsingRules {
+        parse_history_expansions: base_rules.is_interactive,
+        parse_brace_expansions: false,
+        parse_dollar_sign_expansions: true,
+        parse_filename_expansions: true,
+        additional_word_stop_characters: vec![],
+    }
+}
+
 pub fn get_default_word_parsing_rules(base_rules: &ShellParsingRules) -> ShellWordParsingRules {
     ShellWordParsingRules {
         parse_history_expansions: base_rules.is_interactive,

@@ -6,7 +6,7 @@ use crate::shell_structures::shell_variable_assignment::{ShellVariableAssignment
 
 use crate::shell_parser_base::ShellWordParsingRules;
 use crate::shell_parsers::shell_word_parser::ShellWordParser;
-use crate::shell_parser_base::{get_default_word_parsing_rules, ShellParsingRules};
+use crate::shell_parser_base::{get_variable_value_word_parsing_rules, ShellParsingRules};
 
 pub struct ShellVariableAssignmentParser<I>
 where
@@ -36,7 +36,7 @@ where
 
     fn parse_next_word(&mut self) -> ParseResult<ShellWord> {
         let i_rules = ShellParsingRules { is_interactive: true };
-        let rules = get_default_word_parsing_rules(&i_rules);
+        let rules = get_variable_value_word_parsing_rules(&i_rules);
         let mut word_parser = ShellWordParser::new(self.iter.clone(), &rules);
         let result = word_parser.parse();
         self.iter = word_parser.iter;

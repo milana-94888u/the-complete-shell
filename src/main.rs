@@ -18,6 +18,8 @@ use shell_structures::shell_word::{ShellExpression, ShellWord};
 use crate::shell_input_iterator::ShellInputIterator;
 use crate::shell_parser_base::{ShellParsingRules, ShellWordParsingRules};
 use crate::shell_parsers::shell_word_parser::ShellWordParser;
+use crate::shell_structures::shell_variable_assignment::ShellVariableAssignment;
+use crate::shell_parsers::shell_variable_assignment_parser::ShellVariableAssignmentParser;
 
 struct ShellInputParser<I>
 where
@@ -113,6 +115,11 @@ where
         let mut word_parser = ShellWordParser::new(self.iter.clone(), &w_rules);
         word_parser.parse()
     }
+
+    fn try_parse_assignment(&mut self) -> ParseResult<ShellVariableAssignment> {
+        let mut parser = ShellVariableAssignmentParser::new(self.iter.clone());
+        parser.parse()
+    }
 }
 
 fn main() {
@@ -125,7 +132,7 @@ fn main() {
                 let mut parser = ShellInputParser {
                     iter: ShellInputIterator::new(line.into_bytes().into_iter().peekable()),
                 };
-                match parser.try_parse_word() {
+                match parser.try_parse_assignment() {
                     Ok(Some(input)) => {
                         println!("{input:?}");
                     },
