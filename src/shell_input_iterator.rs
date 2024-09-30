@@ -17,6 +17,7 @@ pub trait ShellInputIteratorExt: Iterator {
     fn next_if(&mut self, func: impl FnOnce(&u8) -> bool) -> Option<u8>;
     fn next_in_word(&mut self, additional_characters: &[u8]) -> Option<u8>;
     fn check_word_end(&mut self, additional_characters: &[u8]) -> bool;
+    fn skip_whitespace(&mut self);
 }
 
 impl<I> ShellInputIterator<I>
@@ -100,5 +101,11 @@ where
             return true;
         }
         additional_characters.contains(&next_char)
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(_) = self.iter.next_if(|&c| { c == b' ' || c == b'\t' }) {
+
+        }
     }
 }
