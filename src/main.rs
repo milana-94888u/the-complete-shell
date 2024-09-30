@@ -5,16 +5,13 @@ mod shell_structures;
 mod shell_input_iterator;
 mod shell_state;
 
-use std::cmp;
 use std::fmt::Debug;
-use std::iter::Peekable;
-use std::num::NonZero;
 use rustyline::{DefaultEditor};
 use rustyline::error::ReadlineError;
 
 use shell_parser_base::{ParseError, ParseResult};
 
-use shell_structures::shell_word::{ShellExpression, ShellWord};
+use shell_structures::shell_word::ShellWord;
 use crate::shell_input_iterator::ShellInputIterator;
 use crate::shell_parser_base::{ShellParsingRules, ShellWordParsingRules};
 use crate::shell_parsers::shell_word_parser::ShellWordParser;

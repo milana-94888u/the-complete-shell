@@ -1,10 +1,8 @@
-use std::fs::read_to_string;
 use crate::shell_input_iterator::{ShellInputIterator, ShellInputIteratorExt};
-use crate::shell_parser_base::{ParseError, ParseResult};
-use crate::shell_structures::shell_word::{ShellWord, ShellExpression};
+use crate::shell_parser_base::ParseResult;
+use crate::shell_structures::shell_word::ShellWord;
 use crate::shell_structures::shell_variable_assignment::{ShellVariableAssignment, VariableAssignmentType};
 
-use crate::shell_parser_base::ShellWordParsingRules;
 use crate::shell_parsers::shell_word_parser::ShellWordParser;
 use crate::shell_parser_base::{get_variable_value_word_parsing_rules, ShellParsingRules};
 
