@@ -1,5 +1,7 @@
 use std::cmp;
 
+use crate::shell_structures::ShellToken;
+
 #[derive(Clone, Debug)]
 struct ShellIntRange {
     start: i64,
@@ -84,9 +86,13 @@ impl ShellIntRange {
             self.end..=self.start
         };
         for i in range.step_by(self.step as usize) {
-            result.push(format!("{:01$}", i, self.alignment).as_bytes().to_vec())
+            result.push(self.get_aligned(i))
         }
         result
+    }
+
+    fn get_aligned(&self, value: i64) -> Vec<u8> {
+        format!("{:01$}", value, self.alignment).as_bytes().to_vec()
     }
 }
 
@@ -108,6 +114,25 @@ impl ShellCharRange {
         for i in range.step_by(self.step as usize) {
             result.push(vec![i]);
         }
+        result
+    }
+}
+
+impl ShellToken for ShellRange {
+    fn restore_original(&self) -> Vec<u8> {
+        let (start, end, step) = match self {
+            ShellRange::Int(i) => (i.get_aligned(i.start), i.get_aligned(i.end), i.step),
+            ShellRange::Char(c) => (vec![c.start], vec![c.end], c.step)
+        };
+        let mut result = vec![b'{'];
+        result.extend(start);
+        result.extend(b"..");
+        result.extend(end);
+        if step != 1 {
+            result.extend(b"..");
+            result.extend(format!("{}", step).as_bytes());
+        }
+        result.push(b'}');
         result
     }
 }
